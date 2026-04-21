@@ -1,3 +1,4 @@
+<?php
 /*
 Plugin Name: Pickup Days Toggle
 Plugin URI: https://github.com/sajidashrafdev/pickup-days-toggle
@@ -7,6 +8,7 @@ Author: Sajid Ashraf
 Author URI: https://pk.linkedin.com/in/sajidashrafdev
 Requires Plugins: woocommerce
 */
+
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
@@ -74,3 +76,50 @@ function pdt_settings_page() {
 
     <?php
 }
+
+// ===============================
+// 3. FRONTEND TAB CONTROL
+// ===============================
+add_action('wp_footer', function() {
+
+    if ( !is_shop() && !is_page() ) return;
+
+    $active_days = get_option('pdt_days', []);
+?>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const activeDays = <?php echo json_encode($active_days); ?>;
+    const allDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+
+    allDays.forEach(day => {
+
+        const tab = document.getElementById("tab-" + day);
+
+        if (!tab) return;
+
+        if (!activeDays.includes(day)) {
+            tab.style.display = "none";
+        } else {
+            tab.style.display = "block";
+        }
+
+    });
+
+    // AUTO OPEN FIRST ACTIVE TAB
+    let firstActive = null;
+
+    allDays.forEach(day => {
+        if (activeDays.includes(day) && !firstActive) {
+            firstActive = document.getElementById("tab-" + day);
+        }
+    });
+
+    if (firstActive) {
+        firstActive.click();
+    }
+
+});
+</script>
+<?php
+});
