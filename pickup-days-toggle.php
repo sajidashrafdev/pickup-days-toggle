@@ -24,3 +24,53 @@ add_action('admin_menu', function() {
         25
     );
 });
+
+// ===============================
+// 2. SETTINGS PAGE HTML
+// ===============================
+function pdt_settings_page() {
+
+    if (isset($_POST['pdt_save'])) {
+        update_option('pdt_days', $_POST['days'] ?? []);
+        echo '<div class="updated"><p>Settings Saved</p></div>';
+    }
+
+    $saved_days = get_option('pdt_days', []);
+    $days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+    ?>
+
+    <div class="wrap">
+        <h1>Pickup Days Settings</h1>
+
+        <form method="post">
+            <table class="form-table">
+                <?php foreach ($days as $day): ?>
+                    <tr>
+                        <th><?php echo ucfirst($day); ?></th>
+                        <td>
+                            <input type="checkbox" name="days[]" value="<?php echo $day; ?>"
+                                <?php checked(in_array($day, $saved_days)); ?>>
+                            Activate
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </table>
+
+            <p>
+                <input type="submit" name="pdt_save" class="button button-primary" value="Save Settings">
+            </p>
+        </form>
+
+        <hr>
+
+        <p style="margin-top:20px;">
+            <strong>Developed by:</strong> Sajid Ashraf<br>
+            <strong>Contact:</strong> 
+            <a href="https://pk.linkedin.com/in/sajidashrafdev" target="_blank">
+                LinkedIn Profile
+            </a>
+        </p>
+    </div>
+
+    <?php
+}
