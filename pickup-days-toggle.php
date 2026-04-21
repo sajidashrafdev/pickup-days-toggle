@@ -1,113 +1,65 @@
 <?php
 /*
-Plugin Name: Pickup Days Toggle & 7-Day Locations
+Plugin Name: Pickup Days Toggle (Nested Tabs Support)
 Plugin URI: https://github.com/sajidashrafdev/pickup-days-toggle
-Description: Toggle pickup days, add locations for each day, and use specific shortcodes like [location_monday].
-Version: 1.8
+Description: Toggle pickup days and control Elementor Nested Tabs visibility on Homepage and Shop.
+Version: 2.0
 Author: Sajid Ashraf
-Author URI: https://pk.linkedin.com/in/sajidashrafdev
-Requires Plugins: woocommerce
 */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ===============================
-// CHECK WOOCOMMERCE
-// ===============================
-add_action('admin_init', function () {
-    if ( ! class_exists('WooCommerce') ) {
-        add_action('admin_notices', function () {
-            echo '<div class="error"><p><strong>Pickup Days Toggle:</strong> WooCommerce is required.</p></div>';
-        });
-    }
-});
-
-// ===============================
-// ADMIN MENU
+// ADMIN MENU & SETTINGS (Keep your existing settings code here)
 // ===============================
 add_action('admin_menu', function () {
-    add_menu_page(
-        'Pickup Days Settings',
-        'Pickup Days',
-        'manage_options',
-        'pickup-days-settings',
-        'pdt_settings_page',
-        'dashicons-calendar',
-        25
-    );
+    add_menu_page('Pickup Days', 'Pickup Days', 'manage_options', 'pickup-days-settings', 'pdt_settings_page', 'dashicons-calendar', 25);
 });
 
-// ===============================
-// SETTINGS PAGE (Backend)
-// ===============================
 function pdt_settings_page() {
     if (isset($_POST['pdt_save'])) {
         update_option('pdt_config', $_POST['pdt_config'] ?? []);
-        echo '<div class="updated"><p>Settings Saved Successfully!</p></div>';
+        echo '<div class="updated"><p>Settings Saved!</p></div>';
     }
-
     $config = get_option('pdt_config', []);
     $days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
     ?>
-
     <div class="wrap">
-        <h1>Pickup Days & 7-Day Locations</h1>
-        <form method="post" style="background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <h1>Pickup Days & Locations</h1>
+        <form method="post">
             <table class="form-table">
-                <thead>
-                    <tr style="text-align: left; border-bottom: 2px solid #eee;">
-                        <th style="padding-bottom: 15px;">Day</th>
-                        <th style="padding-bottom: 15px;">Active Status</th>
-                        <th style="padding-bottom: 15px;">Location (Shortcode)</th>
-                    </tr>
-                </thead>
-                <tbody>
                 <?php foreach ($days as $day): 
                     $is_active = isset($config[$day]['active']) ? 'checked' : '';
-                    $location_val = $config[$day]['location'] ?? '';
+                    $loc = $config[$day]['location'] ?? '';
                 ?>
-                    <tr style="border-bottom: 1px solid #f9f9f9;">
-                        <th><strong><?php echo ucfirst($day); ?></strong></th>
-                        <td>
-                            <input type="checkbox" name="pdt_config[<?php echo $day; ?>][active]" value="1" <?php echo $is_active; ?>> Active
-                        </td>
-                        <td>
-                            <input type="text" name="pdt_config[<?php echo $day; ?>][location]" 
-                                   value="<?php echo esc_attr($location_val); ?>" 
-                                   class="regular-text" placeholder="Enter location">
-                            <br><small>Shortcode: <code>[location_<?php echo $day; ?>]</code></small>
-                        </td>
-                    </tr>
+                <tr>
+                    <th><?php echo ucfirst($day); ?></th>
+                    <td><input type="checkbox" name="pdt_config[<?php echo $day; ?>][active]" value="1" <?php echo $is_active; ?>> Active</td>
+                    <td><input type="text" name="pdt_config[<?php echo $day; ?>][location]" value="<?php echo esc_attr($loc); ?>" class="regular-text" placeholder="Enter location for <?php echo ucfirst($day); ?>..."></td>
+                </tr>
                 <?php endforeach; ?>
-                </tbody>
             </table>
-            <p><input type="submit" name="pdt_save" class="button button-primary" value="Save Settings"></p>
+            <input type="submit" name="pdt_save" class="button button-primary" value="Save Settings">
         </form>
     </div>
     <?php
 }
 
 // ===============================
-// REGISTER 7 SHORTCODES (One for each day)
+// SHORTCODES FOR EACH DAY
 // ===============================
 add_action('init', function() {
     $days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-    
     foreach ($days as $day) {
         add_shortcode('location_' . $day, function() use ($day) {
             $config = get_option('pdt_config', []);
-            
-            // Agar day active hai aur location mojood hai
-            if ( !empty($config[$day]['active']) && !empty($config[$day]['location']) ) {
-                return '<div class="pdt-location-' . $day . '">' . esc_html($config[$day]['location']) . '</div>';
-            }
-            return ''; // Kuch nahi dikhayega agar inactive ho
+            return (!empty($config[$day]['active']) && !empty($config[$day]['location'])) ? esc_html($config[$day]['location']) : '';
         });
     }
 });
 
 // ===============================
-// FRONTEND LOGIC (JS)
+// FRONTEND JAVASCRIPT (The Main Fix)
 // ===============================
 add_action('wp_footer', function () {
     if ( is_admin() ) return;
@@ -122,6 +74,7 @@ add_action('wp_footer', function () {
     const activeDays = <?php echo json_encode($active_days); ?>;
     const allDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
     const dayMap = { 1: "monday", 2: "tuesday", 3: "wednesday", 4: "thursday", 5: "friday", 6: "saturday", 0: "sunday" };
+    const dayToIndex = { "monday": 1, "tuesday": 2, "wednesday": 3, "thursday": 4, "friday": 5, "saturday": 6, "sunday": 7 };
 
     function getToday() { return dayMap[new Date().getDay()]; }
 
@@ -132,43 +85,66 @@ add_action('wp_footer', function () {
         return null;
     }
 
-    function hideInactiveTabs() {
+    function syncTabs() {
         allDays.forEach(day => {
-            let tab = document.getElementById("tab-" + day);
-            if (tab && !activeDays.includes(day)) { tab.style.display = "none"; }
+            const index = dayToIndex[day];
+            // Dono ko target karega: Aapki ID (#tab-tuesday) aur Elementor ka index [data-tab-index="2"]
+            const selectors = [
+                `#tab-${day}`,
+                `.e-n-tab-title[data-tab-index="${index}"]`
+            ];
+
+            selectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    if (!activeDays.includes(day)) {
+                        el.style.display = "none";
+                    } else {
+                        el.style.display = ""; // Default behavior
+                    }
+                });
+            });
         });
     }
 
     function activateTab(day) {
         if (!day) return;
-        let el = document.getElementById("tab-" + day);
-        if (el) el.click();
+        const index = dayToIndex[day];
+        // Priority check: Manually added ID pehle, phir Elementor default index
+        const btn = document.getElementById("tab-" + day) || 
+                    document.querySelector(`.e-n-tab-title[data-tab-index="${index}"]`);
+        
+        if (btn) {
+            btn.click();
+        }
     }
 
     window.addEventListener("load", function () {
         if (activeDays.length === 0) {
-            document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = "none");
+            document.querySelectorAll('.e-n-tab-title').forEach(el => el.style.display = "none");
             return;
         }
 
-        let i = 0;
-        let t = setInterval(() => {
-            if (document.getElementById("tab-monday") || i > 20) {
-                clearInterval(t);
-                hideInactiveTabs();
+        // Elementor Nested Tabs thora late render hotay hain, isliye interval zaroori hai
+        let checkExist = setInterval(function() {
+            if (document.querySelectorAll('.e-n-tab-title').length > 0) {
+                clearInterval(checkExist);
+                
+                syncTabs();
+
                 let params = new URLSearchParams(window.location.search);
                 let dayParam = params.get("day");
-                activateTab((dayParam && activeDays.includes(dayParam)) ? dayParam : getValidDay());
+                let target = (dayParam && activeDays.includes(dayParam)) ? dayParam : getValidDay();
+                
+                activateTab(target);
             }
-            i++;
         }, 300);
-
+        
+        // Link update logic
         let btnWrap = document.getElementById("today-menu-btn");
         if (btnWrap) {
             let a = btnWrap.querySelector("a");
             let valid = getValidDay();
             if (a && valid) { a.href = "/menu/?day=" + valid; }
-            else { btnWrap.style.display = "none"; }
         }
     });
 })();
