@@ -3,19 +3,31 @@
 Plugin Name: Pickup Days Toggle
 Plugin URI: https://github.com/sajidashrafdev/pickup-days-toggle
 Description: Toggle pickup days from backend and control Elementor tabs visibility.
-Version: 1.1
+Version: 1.2
 Author: Sajid Ashraf
 Author URI: https://pk.linkedin.com/in/sajidashrafdev
 Requires Plugins: woocommerce
 */
 
-
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+
 // ===============================
-// 1. CREATE SETTINGS MENU
+// CHECK WOOCOMMERCE
 // ===============================
-add_action('admin_menu', function() {
+add_action('admin_init', function () {
+    if ( ! class_exists('WooCommerce') ) {
+        add_action('admin_notices', function () {
+            echo '<div class="error"><p><strong>Pickup Days Toggle:</strong> WooCommerce is required.</p></div>';
+        });
+    }
+});
+
+
+// ===============================
+// ADMIN MENU
+// ===============================
+add_action('admin_menu', function () {
     add_menu_page(
         'Pickup Days Settings',
         'Pickup Days',
@@ -27,8 +39,9 @@ add_action('admin_menu', function() {
     );
 });
 
+
 // ===============================
-// 2. SETTINGS PAGE HTML
+// SETTINGS PAGE
 // ===============================
 function pdt_settings_page() {
 
@@ -50,9 +63,11 @@ function pdt_settings_page() {
                     <tr>
                         <th><?php echo ucfirst($day); ?></th>
                         <td>
-                            <input type="checkbox" name="days[]" value="<?php echo $day; ?>"
-                                <?php checked(in_array($day, $saved_days)); ?>>
-                            Activate
+                            <label>
+                                <input type="checkbox" name="days[]" value="<?php echo esc_attr($day); ?>"
+                                    <?php checked(in_array($day, $saved_days)); ?>>
+                                Active
+                            </label>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -62,64 +77,142 @@ function pdt_settings_page() {
                 <input type="submit" name="pdt_save" class="button button-primary" value="Save Settings">
             </p>
         </form>
-
-        <hr>
-
-        <p style="margin-top:20px;">
-            <strong>Developed by:</strong> Sajid Ashraf<br>
-            <strong>Contact:</strong> 
-            <a href="https://pk.linkedin.com/in/sajidashrafdev" target="_blank">
-                LinkedIn Profile
-            </a>
-        </p>
     </div>
 
     <?php
 }
 
-// ===============================
-// 3. FRONTEND TAB CONTROL
-// ===============================
-add_action('wp_footer', function() {
 
-    if ( !is_shop() && !is_page() ) return;
+// ===============================
+// FRONTEND LOGIC (MAIN FIX)
+// ===============================
+add_action('wp_footer', function () {
+
+    if ( is_admin() ) return;
 
     $active_days = get_option('pdt_days', []);
+
 ?>
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+(function () {
 
-    const activeDays = <?php echo json_encode($active_days); ?>;
+    const activeDays = <?php echo json_encode(array_values($active_days)); ?>;
+
     const allDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
 
-    allDays.forEach(day => {
+    const dayMap = {
+        1: "monday",
+        2: "tuesday",
+        3: "wednesday",
+        4: "thursday",
+        5: "friday",
+        6: "saturday",
+        0: "sunday"
+    };
 
-        const tab = document.getElementById("tab-" + day);
-
-        if (!tab) return;
-
-        if (!activeDays.includes(day)) {
-            tab.style.display = "none";
-        } else {
-            tab.style.display = "block";
-        }
-
-    });
-
-    // AUTO OPEN FIRST ACTIVE TAB
-    let firstActive = null;
-
-    allDays.forEach(day => {
-        if (activeDays.includes(day) && !firstActive) {
-            firstActive = document.getElementById("tab-" + day);
-        }
-    });
-
-    if (firstActive) {
-        firstActive.click();
+    function getToday() {
+        return dayMap[new Date().getDay()];
     }
 
-});
+    function getValidDay() {
+
+        let today = getToday();
+
+        if (activeDays.includes(today)) {
+            return today;
+        }
+
+        for (let d of allDays) {
+            if (activeDays.includes(d)) return d;
+        }
+
+        return null;
+    }
+
+    function hideInactiveTabs() {
+        allDays.forEach(day => {
+            let tab = document.getElementById("tab-" + day);
+            if (!tab) return;
+
+            if (!activeDays.includes(day)) {
+                tab.style.display = "none";
+            }
+        });
+    }
+
+    function activateTab(day) {
+        if (!day) return;
+
+        let el = document.getElementById("tab-" + day);
+        if (el) el.click();
+    }
+
+    function waitTabs(cb) {
+        let i = 0;
+        let t = setInterval(() => {
+            if (document.getElementById("tab-monday") || i > 20) {
+                clearInterval(t);
+                cb();
+            }
+            i++;
+        }, 300);
+    }
+
+    window.addEventListener("load", function () {
+
+        // ======================
+        // 1. If NO active days → hide everything
+        // ======================
+        if (activeDays.length === 0) {
+
+            document.querySelectorAll('[id^="tab-"]').forEach(el => {
+                el.style.display = "none";
+            });
+
+            let btn = document.getElementById("today-menu-btn");
+            if (btn) btn.style.display = "none";
+
+            return;
+        }
+
+        waitTabs(function () {
+
+            hideInactiveTabs();
+
+            let params = new URLSearchParams(window.location.search);
+            let dayParam = params.get("day");
+
+            if (dayParam && activeDays.includes(dayParam)) {
+                activateTab(dayParam);
+                return;
+            }
+
+            activateTab(getValidDay());
+
+        });
+
+        // ======================
+        // BUTTON FIX
+        // ======================
+        let btnWrap = document.getElementById("today-menu-btn");
+
+        if (btnWrap) {
+
+            let a = btnWrap.querySelector("a");
+            let valid = getValidDay();
+
+            if (a && valid) {
+                a.href = "/menu/?day=" + valid;
+            }
+
+            if (!valid) {
+                btnWrap.style.display = "none";
+            }
+        }
+
+    });
+
+})();
 </script>
 <?php
 });
