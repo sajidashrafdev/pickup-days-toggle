@@ -2,8 +2,8 @@
 /*
 Plugin Name: Pickup Days Toggle (Nested Tabs Support)
 Plugin URI: https://github.com/sajidashrafdev/pickup-days-toggle
-Description: Toggle pickup days and control Elementor Nested Tabs visibility with cutoff logic.
-Version: 3.0
+Description: Toggle pickup days, cutoff logic, and dynamic pickup message shortcode.
+Version: 3.1
 Author: Sajid Ashraf
 */
 
@@ -20,10 +20,9 @@ function pdt_settings_page() {
     if (isset($_POST['pdt_save'])) {
         $config = $_POST['pdt_config'] ?? [];
 
-        // sanitize cutoff time
-        if (!empty($config['cutoff_time'])) {
-            $config['cutoff_time'] = sanitize_text_field($config['cutoff_time']);
-        }
+        $config['cutoff_time'] = sanitize_text_field($config['cutoff_time'] ?? '10:00');
+        $config['msg_before']  = wp_kses_post($config['msg_before'] ?? '');
+        $config['msg_after']   = wp_kses_post($config['msg_after'] ?? '');
 
         update_option('pdt_config', $config);
         echo '<div class="updated"><p>Settings Saved!</p></div>';
@@ -31,52 +30,71 @@ function pdt_settings_page() {
 
     $config = get_option('pdt_config', []);
     $days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-    ?>
-    <div class="wrap">
-        <h1>Pickup Days & Locations</h1>
+?>
+<div class="wrap">
+    <h1>Pickup Days Settings</h1>
 
-        <form method="post">
-            <table class="form-table">
+    <form method="post">
+        <table class="form-table">
 
-                <!-- Cutoff Time -->
-                <tr>
-                    <th>Order Cutoff Time</th>
-                    <td>
-                        <input type="time" name="pdt_config[cutoff_time]" 
-                        value="<?php echo esc_attr($config['cutoff_time'] ?? '10:00'); ?>">
-                        <p class="description">After this time, next day's menu will be shown.</p>
-                    </td>
-                </tr>
+            <!-- Cutoff -->
+            <tr>
+                <th>Order Cutoff Time</th>
+                <td>
+                    <input type="time" name="pdt_config[cutoff_time]" 
+                    value="<?php echo esc_attr($config['cutoff_time'] ?? '10:00'); ?>">
+                </td>
+            </tr>
 
-                <?php foreach ($days as $day): 
-                    $is_active = isset($config[$day]['active']) ? 'checked' : '';
-                    $loc = $config[$day]['location'] ?? '';
-                ?>
-                <tr>
-                    <th><?php echo ucfirst($day); ?></th>
-                    <td>
-                        <input type="checkbox" name="pdt_config[<?php echo $day; ?>][active]" value="1" <?php echo $is_active; ?>> Active
-                    </td>
-                    <td>
-                        <input type="text" name="pdt_config[<?php echo $day; ?>][location]" 
-                        value="<?php echo esc_attr($loc); ?>" 
-                        class="regular-text" 
-                        placeholder="Enter location...">
-                    </td>
-                </tr>
-                <?php endforeach; ?>
+            <!-- Messages -->
+            <tr>
+                <th>Message Before Cutoff</th>
+                <td>
+                    <textarea name="pdt_config[msg_before]" rows="3" class="large-text"><?php 
+                    echo esc_textarea($config['msg_before'] ?? 'Order before 10 AM for same-day pickup'); 
+                    ?></textarea>
+                </td>
+            </tr>
 
-            </table>
+            <tr>
+                <th>Message After Cutoff</th>
+                <td>
+                    <textarea name="pdt_config[msg_after]" rows="3" class="large-text"><?php 
+                    echo esc_textarea($config['msg_after'] ?? 'Same-day orders closed, please select a future day.<br><small style="color:#54555b;">You can still pre-order for tomorrow.</small>'); 
+                    ?></textarea>
+                </td>
+            </tr>
 
-            <input type="submit" name="pdt_save" class="button button-primary" value="Save Settings">
-        </form>
-    </div>
-    <?php
+            <!-- Days -->
+            <?php foreach ($days as $day): 
+                $is_active = isset($config[$day]['active']) ? 'checked' : '';
+                $loc = $config[$day]['location'] ?? '';
+            ?>
+            <tr>
+                <th><?php echo ucfirst($day); ?></th>
+                <td>
+                    <input type="checkbox" name="pdt_config[<?php echo $day; ?>][active]" value="1" <?php echo $is_active; ?>> Active
+                </td>
+                <td>
+                    <input type="text" name="pdt_config[<?php echo $day; ?>][location]" 
+                    value="<?php echo esc_attr($loc); ?>" class="regular-text">
+                </td>
+            </tr>
+            <?php endforeach; ?>
+
+        </table>
+
+        <input type="submit" name="pdt_save" class="button button-primary" value="Save Settings">
+    </form>
+</div>
+<?php
 }
 
 // ===============================
 // SHORTCODES
 // ===============================
+
+// Location shortcodes
 add_action('init', function() {
     $days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
 
@@ -88,6 +106,11 @@ add_action('init', function() {
                 : '';
         });
     }
+});
+
+// Pickup Message Shortcode
+add_shortcode('pickup_message', function() {
+    return '<div id="pickup-message"></div>';
 });
 
 // ===============================
@@ -107,7 +130,9 @@ add_action('wp_footer', function () {
         }
     }
 
-    $cutoff_time = !empty($config['cutoff_time']) ? $config['cutoff_time'] : '10:00';
+    $cutoff_time = $config['cutoff_time'] ?? '10:00';
+    $msg_before  = $config['msg_before'] ?? 'Order before 10 AM for same-day pickup';
+    $msg_after   = $config['msg_after'] ?? 'Same-day orders closed, please select a future day.';
 ?>
 <script>
 (function () {
@@ -116,124 +141,32 @@ add_action('wp_footer', function () {
 
         const activeDays = <?php echo json_encode($active_days); ?>;
         const cutoffTime = "<?php echo esc_js($cutoff_time); ?>";
+        const msgBefore = <?php echo json_encode($msg_before); ?>;
+        const msgAfter  = <?php echo json_encode($msg_after); ?>;
 
-        const allDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+        const dayMap = {0:"sunday",1:"monday",2:"tuesday",3:"wednesday",4:"thursday",5:"friday",6:"saturday"};
 
-        const dayMap = {
-            0: "sunday", 1: "monday", 2: "tuesday", 3: "wednesday",
-            4: "thursday", 5: "friday", 6: "saturday"
-        };
+        function updatePickupMessage() {
+            const el = document.getElementById("pickup-message");
+            if (!el) return;
 
-        const dayToIndex = {
-            "monday": 1, "tuesday": 2, "wednesday": 3,
-            "thursday": 4, "friday": 5, "saturday": 6, "sunday": 7
-        };
-
-        function getCurrentDayWithCutoff() {
             const now = new Date();
-            const parts = cutoffTime.split(":");
+            const irelandTime = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Dublin" }));
 
-            if (parts.length !== 2) return dayMap[now.getDay()];
+            const [h, m] = cutoffTime.split(":").map(Number);
 
-            const cutHour = parseInt(parts[0]);
-            const cutMin = parseInt(parts[1]);
+            const current = irelandTime.getHours() * 60 + irelandTime.getMinutes();
+            const cutoff  = h * 60 + m;
 
-            let dayIndex = now.getDay();
-
-            if (
-                now.getHours() > cutHour ||
-                (now.getHours() === cutHour && now.getMinutes() >= cutMin)
-            ) {
-                dayIndex = (dayIndex + 1) % 7;
-            }
-
-            return dayMap[dayIndex];
-        }
-
-        function getValidDay() {
-            let today = getCurrentDayWithCutoff();
-
-            if (activeDays.includes(today)) return today;
-
-            let index = Object.keys(dayMap).find(key => dayMap[key] === today);
-
-            for (let i = 0; i < 7; i++) {
-                let nextIndex = (parseInt(index) + i) % 7;
-                let nextDay = dayMap[nextIndex];
-
-                if (activeDays.includes(nextDay)) return nextDay;
-            }
-
-            return null;
-        }
-
-        function syncTabs() {
-            allDays.forEach(day => {
-                const index = dayToIndex[day];
-
-                const selectors = [
-                    "#tab-" + day,
-                    '.e-n-tab-title[data-tab-index="' + index + '"]'
-                ];
-
-                selectors.forEach(selector => {
-                    document.querySelectorAll(selector).forEach(el => {
-                        el.style.display = activeDays.includes(day) ? "" : "none";
-                    });
-                });
-            });
-        }
-
-        function activateTab(day) {
-            if (!day) return;
-
-            const index = dayToIndex[day];
-
-            const btn =
-                document.getElementById("tab-" + day) ||
-                document.querySelector('.e-n-tab-title[data-tab-index="' + index + '"]');
-
-            if (btn) btn.click();
+            el.innerHTML = (current < cutoff) ? msgBefore : msgAfter;
         }
 
         window.addEventListener("load", function () {
-
-            if (!activeDays.length) {
-                document.querySelectorAll('.e-n-tab-title').forEach(el => el.style.display = "none");
-                return;
-            }
-
-            let interval = setInterval(function () {
-                if (document.querySelectorAll('.e-n-tab-title').length > 0) {
-                    clearInterval(interval);
-
-                    syncTabs();
-
-                    let params = new URLSearchParams(window.location.search);
-                    let dayParam = params.get("day");
-
-                    let target = (dayParam && activeDays.includes(dayParam))
-                        ? dayParam
-                        : getValidDay();
-
-                    activateTab(target);
-                }
-            }, 300);
-
-            // Update Today Menu Button
-            let btnWrap = document.getElementById("today-menu-btn");
-            if (btnWrap) {
-                let a = btnWrap.querySelector("a");
-                let valid = getValidDay();
-                if (a && valid) {
-                    a.href = "/menu/?day=" + valid;
-                }
-            }
-
+            updatePickupMessage();
         });
 
     } catch (e) {
-        console.error("Pickup Days Plugin Error:", e);
+        console.error("Pickup Plugin Error:", e);
     }
 
 })();
