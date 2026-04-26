@@ -2,15 +2,15 @@
 /*
 Plugin Name: Pickup Days Toggle (Nested Tabs Support)
 Plugin URI: https://github.com/sajidashrafdev/pickup-days-toggle
-Description: Toggle pickup days and control Elementor Nested Tabs visibility on Homepage and Shop.
-Version: 2.0
+Description: Toggle pickup days and control Elementor Nested Tabs visibility with cutoff logic.
+Version: 3.0
 Author: Sajid Ashraf
 */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ===============================
-// ADMIN MENU & SETTINGS (Keep your existing settings code here)
+// ADMIN MENU & SETTINGS
 // ===============================
 add_action('admin_menu', function () {
     add_menu_page('Pickup Days', 'Pickup Days', 'manage_options', 'pickup-days-settings', 'pdt_settings_page', 'dashicons-calendar', 25);
@@ -18,27 +18,56 @@ add_action('admin_menu', function () {
 
 function pdt_settings_page() {
     if (isset($_POST['pdt_save'])) {
-        update_option('pdt_config', $_POST['pdt_config'] ?? []);
+        $config = $_POST['pdt_config'] ?? [];
+
+        // sanitize cutoff time
+        if (!empty($config['cutoff_time'])) {
+            $config['cutoff_time'] = sanitize_text_field($config['cutoff_time']);
+        }
+
+        update_option('pdt_config', $config);
         echo '<div class="updated"><p>Settings Saved!</p></div>';
     }
+
     $config = get_option('pdt_config', []);
     $days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
     ?>
     <div class="wrap">
         <h1>Pickup Days & Locations</h1>
+
         <form method="post">
             <table class="form-table">
+
+                <!-- Cutoff Time -->
+                <tr>
+                    <th>Order Cutoff Time</th>
+                    <td>
+                        <input type="time" name="pdt_config[cutoff_time]" 
+                        value="<?php echo esc_attr($config['cutoff_time'] ?? '10:00'); ?>">
+                        <p class="description">After this time, next day's menu will be shown.</p>
+                    </td>
+                </tr>
+
                 <?php foreach ($days as $day): 
                     $is_active = isset($config[$day]['active']) ? 'checked' : '';
                     $loc = $config[$day]['location'] ?? '';
                 ?>
                 <tr>
                     <th><?php echo ucfirst($day); ?></th>
-                    <td><input type="checkbox" name="pdt_config[<?php echo $day; ?>][active]" value="1" <?php echo $is_active; ?>> Active</td>
-                    <td><input type="text" name="pdt_config[<?php echo $day; ?>][location]" value="<?php echo esc_attr($loc); ?>" class="regular-text" placeholder="Enter location for <?php echo ucfirst($day); ?>..."></td>
+                    <td>
+                        <input type="checkbox" name="pdt_config[<?php echo $day; ?>][active]" value="1" <?php echo $is_active; ?>> Active
+                    </td>
+                    <td>
+                        <input type="text" name="pdt_config[<?php echo $day; ?>][location]" 
+                        value="<?php echo esc_attr($loc); ?>" 
+                        class="regular-text" 
+                        placeholder="Enter location...">
+                    </td>
                 </tr>
                 <?php endforeach; ?>
+
             </table>
+
             <input type="submit" name="pdt_save" class="button button-primary" value="Save Settings">
         </form>
     </div>
@@ -46,107 +75,167 @@ function pdt_settings_page() {
 }
 
 // ===============================
-// SHORTCODES FOR EACH DAY
+// SHORTCODES
 // ===============================
 add_action('init', function() {
     $days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+
     foreach ($days as $day) {
         add_shortcode('location_' . $day, function() use ($day) {
             $config = get_option('pdt_config', []);
-            return (!empty($config[$day]['active']) && !empty($config[$day]['location'])) ? esc_html($config[$day]['location']) : '';
+            return (!empty($config[$day]['active']) && !empty($config[$day]['location'])) 
+                ? esc_html($config[$day]['location']) 
+                : '';
         });
     }
 });
 
 // ===============================
-// FRONTEND JAVASCRIPT (The Main Fix)
+// FRONTEND SCRIPT
 // ===============================
 add_action('wp_footer', function () {
-    if ( is_admin() ) return;
+
+    if (is_admin()) return;
+
     $config = get_option('pdt_config', []);
     $active_days = [];
+
     foreach ($config as $day => $data) {
-        if (!empty($data['active'])) { $active_days[] = $day; }
+        if (in_array($day, ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) 
+            && !empty($data['active'])) {
+            $active_days[] = $day;
+        }
     }
+
+    $cutoff_time = !empty($config['cutoff_time']) ? $config['cutoff_time'] : '10:00';
 ?>
 <script>
 (function () {
-    const activeDays = <?php echo json_encode($active_days); ?>;
-    const allDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-    const dayMap = { 1: "monday", 2: "tuesday", 3: "wednesday", 4: "thursday", 5: "friday", 6: "saturday", 0: "sunday" };
-    const dayToIndex = { "monday": 1, "tuesday": 2, "wednesday": 3, "thursday": 4, "friday": 5, "saturday": 6, "sunday": 7 };
 
-    function getToday() { return dayMap[new Date().getDay()]; }
+    try {
 
-    function getValidDay() {
-        let today = getToday();
-        if (activeDays.includes(today)) return today;
-        for (let d of allDays) { if (activeDays.includes(d)) return d; }
-        return null;
-    }
+        const activeDays = <?php echo json_encode($active_days); ?>;
+        const cutoffTime = "<?php echo esc_js($cutoff_time); ?>";
 
-    function syncTabs() {
-        allDays.forEach(day => {
-            const index = dayToIndex[day];
-            // Dono ko target karega: Aapki ID (#tab-tuesday) aur Elementor ka index [data-tab-index="2"]
-            const selectors = [
-                `#tab-${day}`,
-                `.e-n-tab-title[data-tab-index="${index}"]`
-            ];
+        const allDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
 
-            selectors.forEach(selector => {
-                document.querySelectorAll(selector).forEach(el => {
-                    if (!activeDays.includes(day)) {
-                        el.style.display = "none";
-                    } else {
-                        el.style.display = ""; // Default behavior
-                    }
+        const dayMap = {
+            0: "sunday", 1: "monday", 2: "tuesday", 3: "wednesday",
+            4: "thursday", 5: "friday", 6: "saturday"
+        };
+
+        const dayToIndex = {
+            "monday": 1, "tuesday": 2, "wednesday": 3,
+            "thursday": 4, "friday": 5, "saturday": 6, "sunday": 7
+        };
+
+        function getCurrentDayWithCutoff() {
+            const now = new Date();
+            const parts = cutoffTime.split(":");
+
+            if (parts.length !== 2) return dayMap[now.getDay()];
+
+            const cutHour = parseInt(parts[0]);
+            const cutMin = parseInt(parts[1]);
+
+            let dayIndex = now.getDay();
+
+            if (
+                now.getHours() > cutHour ||
+                (now.getHours() === cutHour && now.getMinutes() >= cutMin)
+            ) {
+                dayIndex = (dayIndex + 1) % 7;
+            }
+
+            return dayMap[dayIndex];
+        }
+
+        function getValidDay() {
+            let today = getCurrentDayWithCutoff();
+
+            if (activeDays.includes(today)) return today;
+
+            let index = Object.keys(dayMap).find(key => dayMap[key] === today);
+
+            for (let i = 0; i < 7; i++) {
+                let nextIndex = (parseInt(index) + i) % 7;
+                let nextDay = dayMap[nextIndex];
+
+                if (activeDays.includes(nextDay)) return nextDay;
+            }
+
+            return null;
+        }
+
+        function syncTabs() {
+            allDays.forEach(day => {
+                const index = dayToIndex[day];
+
+                const selectors = [
+                    "#tab-" + day,
+                    '.e-n-tab-title[data-tab-index="' + index + '"]'
+                ];
+
+                selectors.forEach(selector => {
+                    document.querySelectorAll(selector).forEach(el => {
+                        el.style.display = activeDays.includes(day) ? "" : "none";
+                    });
                 });
             });
-        });
-    }
-
-    function activateTab(day) {
-        if (!day) return;
-        const index = dayToIndex[day];
-        // Priority check: Manually added ID pehle, phir Elementor default index
-        const btn = document.getElementById("tab-" + day) || 
-                    document.querySelector(`.e-n-tab-title[data-tab-index="${index}"]`);
-        
-        if (btn) {
-            btn.click();
-        }
-    }
-
-    window.addEventListener("load", function () {
-        if (activeDays.length === 0) {
-            document.querySelectorAll('.e-n-tab-title').forEach(el => el.style.display = "none");
-            return;
         }
 
-        // Elementor Nested Tabs thora late render hotay hain, isliye interval zaroori hai
-        let checkExist = setInterval(function() {
-            if (document.querySelectorAll('.e-n-tab-title').length > 0) {
-                clearInterval(checkExist);
-                
-                syncTabs();
+        function activateTab(day) {
+            if (!day) return;
 
-                let params = new URLSearchParams(window.location.search);
-                let dayParam = params.get("day");
-                let target = (dayParam && activeDays.includes(dayParam)) ? dayParam : getValidDay();
-                
-                activateTab(target);
+            const index = dayToIndex[day];
+
+            const btn =
+                document.getElementById("tab-" + day) ||
+                document.querySelector('.e-n-tab-title[data-tab-index="' + index + '"]');
+
+            if (btn) btn.click();
+        }
+
+        window.addEventListener("load", function () {
+
+            if (!activeDays.length) {
+                document.querySelectorAll('.e-n-tab-title').forEach(el => el.style.display = "none");
+                return;
             }
-        }, 300);
-        
-        // Link update logic
-        let btnWrap = document.getElementById("today-menu-btn");
-        if (btnWrap) {
-            let a = btnWrap.querySelector("a");
-            let valid = getValidDay();
-            if (a && valid) { a.href = "/menu/?day=" + valid; }
-        }
-    });
+
+            let interval = setInterval(function () {
+                if (document.querySelectorAll('.e-n-tab-title').length > 0) {
+                    clearInterval(interval);
+
+                    syncTabs();
+
+                    let params = new URLSearchParams(window.location.search);
+                    let dayParam = params.get("day");
+
+                    let target = (dayParam && activeDays.includes(dayParam))
+                        ? dayParam
+                        : getValidDay();
+
+                    activateTab(target);
+                }
+            }, 300);
+
+            // Update Today Menu Button
+            let btnWrap = document.getElementById("today-menu-btn");
+            if (btnWrap) {
+                let a = btnWrap.querySelector("a");
+                let valid = getValidDay();
+                if (a && valid) {
+                    a.href = "/menu/?day=" + valid;
+                }
+            }
+
+        });
+
+    } catch (e) {
+        console.error("Pickup Days Plugin Error:", e);
+    }
+
 })();
 </script>
 <?php
